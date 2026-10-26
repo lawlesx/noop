@@ -12,6 +12,45 @@ final class RecoveryScorerTraceTests: XCTestCase {
                       nightsSinceUpdate: 0, status: nValid >= 14 ? .trusted : .provisional)
     }
 
+    func testLnHrvShadowLineNeverMovesTheScore() {
+        // A usable ln baseline adds exactly one shadow line; the returned score stays recovery(...) verbatim.
+        let hrvB = baseline(mean: 50, sigma: 6)
+        let rhrB = baseline(mean: 55, sigma: 3)
+        let lnB = baseline(mean: log(50), sigma: 0.12)
+        let plain = RecoveryScorer.recovery(
+            hrv: 62, rhr: 51, resp: nil,
+            hrvBaseline: hrvB, rhrBaseline: rhrB, respBaseline: nil,
+            sleepPerf: 0.9, skinTempDev: nil)
+        let (traced, lines) = RecoveryScorer.recoveryTrace(
+            hrv: 62, rhr: 51, resp: nil,
+            hrvBaseline: hrvB, rhrBaseline: rhrB, respBaseline: nil,
+            sleepPerf: 0.9, skinTempDev: nil, lnHrvBaseline: lnB)
+        XCTAssertEqual(traced, plain)
+        // Pinned literal; the Kotlin RecoveryScorerTraceTest asserts the same string.
+        XCTAssertEqual(lines.filter { $0.hasPrefix("charge lnHrvShadow ") }, [
+            "charge lnHrvShadow lnHrvZ=1.79 rawHrvZ=2.0 lnMean=3.91 lnSpread=0.1 wouldScore=93.45 "
+                + "delta=-1.14 wouldBand=green (HRV term on ln(RMSSD). DETECTED ONLY, not applied: "
+                + "the score above is unchanged)",
+        ])
+    }
+
+    func testLnHrvShadowLineAbsentWithoutUsableLnBaseline() {
+        let hrvB = baseline(mean: 50, sigma: 6)
+        let calibrating = BaselineState(baseline: log(50), spread: 0.1, nValid: 2,
+                                        nightsSinceUpdate: 0, status: .calibrating)
+        for lnB in [nil, calibrating] {
+            let (_, lines) = RecoveryScorer.recoveryTrace(
+                hrv: 62, rhr: 51, resp: nil,
+                hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
+                sleepPerf: 0.9, skinTempDev: nil, lnHrvBaseline: lnB)
+            XCTAssertFalse(lines.contains { $0.contains("lnHrvShadow") })
+        }
+    }
+
+    func testLnHrvValuesKeepsNilsAndFloorsAtOneMs() {
+        XCTAssertEqual(RecoveryScorer.lnHrvValues([nil, 1, 0.5, M_E]), [nil, 0, 0, 1])
+    }
+
     func testTraceScoreIsByteIdenticalToRecovery() {
         // Full set of terms present: the trace's returned score must equal recovery(...) exactly.
         let hrvB = baseline(mean: 50, sigma: 6)

@@ -1597,6 +1597,15 @@ object IntelligenceEngine {
         val baselines2 = ProfileBaselines(
             hrv = hrvBase2, restingHR = rhrBase2, resp = respBase2, skinTemp = skinBase2,
         )
+        // ln(RMSSD) shadow baseline for the Charge trace's `lnHrvShadow` line: the SAME HRV history and
+        // epoch as hrvBase2, mapped into the log domain. Folded only while the Recovery test mode is on, and
+        // read only by the trace, so Charge is untouched and the default path pays nothing. Mirrors Swift.
+        val lnHrvBase2 = if (recoveryTraceSink != null) {
+            Baselines.foldHistory(
+                RecoveryScorerTrace.lnHrvValues(hrvHistory.values), hrvHistory.dayKeys,
+                Baselines.readinessHRVLnCfg, baselineEpoch,
+            )
+        } else null
 
         // Real (non-detected) workouts in the scored window, used to de-duplicate detected bouts so a
         // user who BOTH has real sessions AND wears the strap doesn't see the same session twice (the
@@ -1701,7 +1710,7 @@ object IntelligenceEngine {
             // `recovery` written above is unchanged. Zero cost when off (the sink stays null, this branch
             // is skipped, recoveryTraceLines is never built). Mirrors the Swift recoveryTraceActive wiring.
             if (recoveryTraceSink != null) {
-                for (line in recoveryTraceLines(daily, baselines2)) recoveryTraceSink(line)
+                for (line in recoveryTraceLines(daily, baselines2, lnHrvBase2)) recoveryTraceSink(line)
             }
             RestScorer.restFromDaily(daily)?.let { rest ->
                 restRows.add(MetricSeriesRow(deviceId = computedId, day = daily.day, key = "sleep_performance", value = rest))
@@ -2481,7 +2490,9 @@ object IntelligenceEngine {
      * when the Recovery test mode is on, so it costs nothing when the mode is off. Mirrors the Swift
      * recoveryTraceLines.
      */
-    private fun recoveryTraceLines(daily: DailyMetric, baselines: ProfileBaselines): List<String> {
+    private fun recoveryTraceLines(
+        daily: DailyMetric, baselines: ProfileBaselines, lnHrvBaseline: BaselineState? = null,
+    ): List<String> {
         val hrvVal = daily.avgHrv
         val rhrVal = daily.restingHr
         val hrvBase = baselines.hrv
@@ -2500,6 +2511,7 @@ object IntelligenceEngine {
             respBaseline = baselines.resp,
             sleepPerf = restQuality,
             skinTempDev = daily.skinTempDevC,
+            lnHrvBaseline = lnHrvBaseline,
         )
         // Prefix each line with the day key so a multi-night export stays parseable, matching the sleep
         // trace's per-day shape.

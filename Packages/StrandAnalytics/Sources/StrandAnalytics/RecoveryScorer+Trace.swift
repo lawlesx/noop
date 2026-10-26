@@ -45,7 +45,8 @@ extension RecoveryScorer {
                                      rhrBaseline: BaselineState?,
                                      respBaseline: BaselineState?,
                                      sleepPerf: Double?,
-                                     skinTempDev: Double? = nil)
+                                     skinTempDev: Double? = nil,
+                                     lnHrvBaseline: BaselineState? = nil)
         -> (score: Double?, trace: [String]) {
 
         // Trace numbers use nearest rounding with half-ties away from zero on both platforms.
@@ -188,6 +189,32 @@ extension RecoveryScorer {
                 + "Easing DETECTED ONLY, not applied: the score above is unchanged)")
         }
 
+        // ── ln(RMSSD) HRV term: DETECTED, NOT APPLIED ────────────────────────────────────────────
+        //
+        // Charge z-scores HRV in raw ms against the linear "hrv" baseline, while ReadinessEngine scores
+        // lnRMSSD because HRV is right-skewed. This line reports what Charge WOULD read with only the HRV
+        // term moved to the log domain, so the two can be compared across real nights before Charge is
+        // ever allowed to change. Emitted only when the caller supplies a usable ln baseline (folded from
+        // lnHrvValues of the SAME history the raw baseline folds). Same exact-delta construction as the
+        // saturation line. Mirrors the Kotlin trace line exactly.
+        if let lnB = lnHrvBaseline, lnB.usable, let s = score, totalWeight > 0 {
+            let lnHrvZ = zScore(lnHrv(hrv), mean: lnB.baseline, spread: lnB.spread)
+            let lnZ = terms.reduce(0) { $0 + ($1.name == "hrv" ? lnHrvZ : $1.z) * $1.w } / totalWeight
+            let wouldBe = logisticScore(compositeZ: lnZ)
+            lines.append("charge lnHrvShadow lnHrvZ=\(r2(lnHrvZ)) rawHrvZ=\(r2(hrvZRaw)) "
+                + "lnMean=\(r2(lnB.baseline)) lnSpread=\(r2(lnB.spread)) "
+                + "wouldScore=\(r2(wouldBe)) delta=\(r2(wouldBe - s)) "
+                + "wouldBand=\(band(wouldBe)) "
+                + "(HRV term on ln(RMSSD). DETECTED ONLY, not applied: the score above is unchanged)")
+        }
+
         return (score, lines)
     }
+
+    /// ln of an RMSSD in ms, floored at 1 ms like ReadinessEngine's log domain. Twin of the Kotlin lnHrv.
+    static func lnHrv(_ rmssdMs: Double) -> Double { log(max(rmssdMs, 1.0)) }
+
+    /// Per-night HRV history mapped into the log domain for the shadow baseline fold. Nils stay nil so
+    /// the fold's day alignment (and its epoch drop) is unchanged. Twin of the Kotlin lnHrvValues.
+    public static func lnHrvValues(_ values: [Double?]) -> [Double?] { values.map { $0.map(lnHrv) } }
 }

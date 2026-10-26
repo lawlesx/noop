@@ -1,6 +1,8 @@
 package com.noop.analytics
 
 import kotlin.math.abs
+import kotlin.math.ln
+import kotlin.math.max
 
 // RecoveryScorerTrace.kt - Kotlin twin of RecoveryScorer+Trace.swift. The Charge TERM-BREAKDOWN
 // diagnostic for the Recovery test mode.
@@ -56,6 +58,9 @@ object RecoveryScorerTrace {
      * Every number is computed with the EXACT same expressions as recovery(...) (the same zScore call, the
      * same skin-temp penalty, the same weights), and the returned score IS recovery(...) verbatim, so the
      * trace and the headline can never diverge. Mirrors the Swift RecoveryScorer.recoveryTrace.
+     *
+     * [lnHrvBaseline] is optional and diagnostic only: when usable it adds the `charge lnHrvShadow` line
+     * and never reaches the returned score.
      */
     fun recoveryTrace(
         hrv: Double,
@@ -66,6 +71,7 @@ object RecoveryScorerTrace {
         respBaseline: BaselineState?,
         sleepPerf: Double?,
         skinTempDev: Double? = null,
+        lnHrvBaseline: BaselineState? = null,
     ): Pair<Double?, List<String>> {
         val lines = ArrayList<String>()
         val nilTerms = ArrayList<String>()
@@ -223,6 +229,39 @@ object RecoveryScorerTrace {
             )
         }
 
+        // ── ln(RMSSD) HRV term: DETECTED, NOT APPLIED ──────────────────────────────────────────────
+        //
+        // Charge z-scores HRV in raw ms against the linear "hrv" baseline, while ReadinessEngine scores
+        // lnRMSSD because HRV is right-skewed. This line reports what Charge WOULD read with only the HRV
+        // term moved to the log domain, so the two can be compared across real nights before Charge is
+        // ever allowed to change. Emitted only when the caller supplies a usable ln baseline (folded from
+        // [lnHrvValues] of the SAME history the raw baseline folds). Same exact-delta construction as the
+        // saturation line: the HRV term (terms[0]) is swapped and the composite runs through
+        // RecoveryScorer.logisticScore. Mirrors the Swift trace line exactly.
+        val lnB = lnHrvBaseline?.takeIf { it.usable }
+        if (lnB != null && score != null && totalWeight > 0.0) {
+            val lnHrvZ = RecoveryScorer.zScore(lnHrv(hrv), lnB.baseline, lnB.spread)
+            val lnZ = terms.withIndex()
+                .sumOf { (i, t) -> (if (i == 0) lnHrvZ else t.first) * t.second } / totalWeight
+            val wouldBe = RecoveryScorer.logisticScore(lnZ)
+            lines.add(
+                "charge lnHrvShadow lnHrvZ=${r2(lnHrvZ)} rawHrvZ=${r2(hrvZRaw)} " +
+                    "lnMean=${r2(lnB.baseline)} lnSpread=${r2(lnB.spread)} " +
+                    "wouldScore=${r2(wouldBe)} delta=${r2(wouldBe - score)} " +
+                    "wouldBand=${RecoveryScorer.band(wouldBe)} " +
+                    "(HRV term on ln(RMSSD). DETECTED ONLY, not applied: the score above is unchanged)",
+            )
+        }
+
         return score to lines
     }
+
+    /** ln of an RMSSD in ms, floored at 1 ms like ReadinessEngine's log domain. Twin of the Swift lnHrv. */
+    internal fun lnHrv(rmssdMs: Double): Double = ln(max(rmssdMs, 1.0))
+
+    /**
+     * Per-night HRV history mapped into the log domain for the shadow baseline fold. Nulls stay null so
+     * the fold's day alignment (and its epoch drop) is unchanged. Twin of the Swift lnHrvValues.
+     */
+    fun lnHrvValues(values: List<Double?>): List<Double?> = values.map { v -> v?.let { lnHrv(it) } }
 }
