@@ -6,8 +6,9 @@ import WhoopStore
 import StrandAnalytics
 
 /// On-device "intelligence": computes recovery / day-strain / sleep from the raw strap streams using
-/// the same model shape WHOOP uses (HRV vs personal baseline ~60%, resting HR ~20%, sleep ~15%,
-/// respiration ~5%; strain 0–21 from cardiovascular load). This is what makes NOOP independent of
+/// the same model shape WHOOP uses. The weights live in `RecoveryScorer` (HRV vs personal baseline
+/// 0.55, resting HR 0.20, sleep 0.15, respiration 0.05, skin temp 0.05); Effort is 0–100 from
+/// cardiovascular load (`StrainScorer`). This is what makes NOOP independent of
 /// WHOOP's cloud , for any day the strap collected raw data with NOOP connected, NOOP scores it
 /// itself rather than relying on the values WHOOP computed in the imported CSV.
 @MainActor
