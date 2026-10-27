@@ -241,6 +241,50 @@ final class EffortDayCalibrationTests: XCTestCase {
         return String(rest.prefix(while: { $0 != " " }))
     }
 
+    // MARK: learned HRmax (DETECTED ONLY)
+
+    /// The rule: the second-highest sustained daily peak, adopted only above Tanaka. Each row is the
+    /// input, the Tanaka value, and what the rule would learn. Byte-parity table with the Kotlin twin.
+    func testLearnedHRmaxRule() {
+        let rows: [(peaks: [Double], tanaka: Double?, want: Double?)] = [
+            ([], 187, nil),                    // no days
+            ([195], 187, nil),                 // one day is not two
+            ([170, 195, 192], 187, 192),       // second-highest, order-independent
+            ([195, 186], 187, nil),            // second day below Tanaka: never lowers
+            ([195, 187], 187, nil),            // equal is not above
+            ([190, 190], 187, 190),            // two days at the same level count
+            ([195, 192], nil, 192),            // no age: any qualifying value
+        ]
+        for r in rows {
+            XCTAssertEqual(StrainScorer.learnedHRmax(r.peaks, tanaka: r.tanaka), r.want, "\(r)")
+        }
+        XCTAssertNil(StrainScorer.learnedHRmax([195, 192], tanaka: nil, minDays: 0))
+    }
+
+    /// The exact bytes, as for the calib line: contributed logs are compared across platforms.
+    func testLearnedHRmaxLineIsExactlyThis() {
+        XCTAssertEqual(
+            StrainScorer.learnedHRmaxLine(anchorDay: "2026-09-25", learned: 192, tanaka: 187,
+                                          override: nil, peakDays: 14),
+            "effort hrmaxLearned day=2026-09-25 learned=192 tanaka=187 override=nil peakDays=14 window=90 "
+                + "minDays=2 (sustained peak on >=minDays days, raise only. DETECTED ONLY, not applied)")
+    }
+
+    /// `DayResult.sustainedPeak` is the value the calib line printed, not a second computation that could
+    /// drift from it; and it stays nil for a caller that attached no diagnostic sink.
+    func testDayResultCarriesTheSustainedPeakTheLinePrinted() {
+        var emitted: [String] = []
+        let res = AnalyticsEngine.analyzeDay(day: "2026-09-25", strainDiag: { emitted.append($0) },
+                                             hr: dayHR(peakBpm: 178, spikeBpm: 201),
+                                             profile: UserProfile(age: 30), maxHROverride: nil)
+        let calib = emitted.first { $0.hasPrefix("effort calib ") } ?? ""
+        XCTAssertEqual(res.sustainedPeak, 178)
+        XCTAssertEqual(field(calib, "sustained="), "178", calib)
+        let silent = AnalyticsEngine.analyzeDay(day: "2026-09-25", hr: dayHR(peakBpm: 178),
+                                                profile: UserProfile(age: 30), maxHROverride: nil)
+        XCTAssertNil(silent.sustainedPeak)
+    }
+
     // MARK: fixture
 
     /// A day whose heart rate is flat at 60 with a ten-minute block at `peakBpm`, plus one optional

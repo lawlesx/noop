@@ -123,6 +123,10 @@ public enum AnalyticsEngine {
         /// refused-main-night HRV rule use; empty when the day has no main night. Exposed so the `hrv diag`
         /// line can describe the night the #1118 gate actually judged instead of re-deriving it (#2425).
         public let mainNightBlocks: [SleepStageTotals.NightBlock]
+        /// The day's `StrainScorer.sustainedPeak` over the Effort HR window, the SAME value the `effort calib`
+        /// line prints, or nil when it was not computed (no diagnostic sink) or no run was dense enough. Read
+        /// by the learned-HRmax instrumentation (#2438); scores nothing. Mirrors Kotlin `DayResult.sustainedPeak`.
+        public let sustainedPeak: Double?
 
         public init(daily: DailyMetric, sleepSessions: [SleepSession],
                     cachedSleep: [CachedSleepSession], workouts: [ExerciseSession],
@@ -136,9 +140,11 @@ public enum AnalyticsEngine {
                     chargeDrivers: [ChargeDriver] = [],
                     skinTempRelative: SkinTempRelative? = nil,
                     detectionFunnel: WorkoutDetector.DetectionFunnel? = nil,
-                    mainNightBlocks: [SleepStageTotals.NightBlock] = []) {
+                    mainNightBlocks: [SleepStageTotals.NightBlock] = [],
+                    sustainedPeak: Double? = nil) {
             self.daily = daily; self.sleepSessions = sleepSessions
             self.mainNightBlocks = mainNightBlocks
+            self.sustainedPeak = sustainedPeak
             self.cachedSleep = cachedSleep; self.workouts = workouts
             self.detectionFunnel = detectionFunnel
             self.recovery = recovery; self.strain = strain
@@ -970,8 +976,11 @@ public enum AnalyticsEngine {
         // one word, and never reports what the day reached. The branch is only visible HERE, because
         // `strain` is handed an HRmax with its provenance already gone. Built only when a sink is
         // attached, and it changes no score.
+        // Computed once and shared by the `effort calib` line and `DayResult.sustainedPeak`, so the logged
+        // value and the one the learned-HRmax line folds cannot disagree. Same zero-cost gate as the line.
+        let hrForPeak = dayHr ?? hr
+        let sustainedPeak: Double? = strainDiag != nil ? StrainScorer.sustainedPeak(hrForPeak) : nil
         if let strainDiag {
-            let hrForPeak = dayHr ?? hr
             strainDiag(StrainScorer.dayCalibrationLine(
                 // The value the day was actually scored against, which for an age-less profile is the
                 // one `strain` substitutes internally rather than nil. Reporting nil there would put
@@ -983,7 +992,7 @@ public enum AnalyticsEngine {
                 observedPeak: hrForPeak.max(by: { $0.bpm < $1.bpm }).map { Double($0.bpm) },
                 restingHR: restForStrain)
                 // The raw peak is usually one isolated sample on a ring; this is the value held (#2438).
-                + StrainScorer.sustainedPeakField(StrainScorer.sustainedPeak(hrForPeak))
+                + StrainScorer.sustainedPeakField(sustainedPeak)
                 + StrainScorer.sustainedPeakSpanField(StrainScorer.sustainedPeakSpan(hrForPeak)))
         }
 
@@ -1166,7 +1175,8 @@ public enum AnalyticsEngine {
                          chargeDrivers: chargeDrivers,
                          skinTempRelative: skinTempRelative,
                          detectionFunnel: detectionFunnel,
-                         mainNightBlocks: mainGroup.map { SleepStageTotals.NightBlock(start: $0.start, end: $0.end) })
+                         mainNightBlocks: mainGroup.map { SleepStageTotals.NightBlock(start: $0.start, end: $0.end) },
+                         sustainedPeak: sustainedPeak)
     }
 
     /// The R-R rows the always-on `hrv diag` line describes (#2425). Pure. Byte-parity twin of Kotlin

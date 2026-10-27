@@ -889,8 +889,11 @@ object AnalyticsEngine {
         // word, and never reports what the day reached. The branch is only visible HERE, because [strain]
         // is handed an HRmax with its provenance already gone. Built only when a sink is attached, and it
         // changes no score.
+        // Computed once and shared by the `effort calib` line and [DayResult.sustainedPeak], so the logged
+        // value and the one the learned-HRmax line folds cannot disagree. Same zero-cost gate as the line.
+        val hrForPeak = dayHr ?: hr
+        val sustainedPeak = if (strainDiag != null) StrainScorer.sustainedPeak(hrForPeak) else null
         strainDiag?.let { sink ->
-            val hrForPeak = dayHr ?: hr
             sink(
                 StrainScorer.dayCalibrationLine(
                     day = day,
@@ -906,7 +909,7 @@ object AnalyticsEngine {
                     restingHR = restForStrain,
                 ) +
                     // The raw peak is usually one isolated sample on a ring; this is the value held (#2438).
-                    StrainScorer.sustainedPeakField(StrainScorer.sustainedPeak(hrForPeak)) +
+                    StrainScorer.sustainedPeakField(sustainedPeak) +
                     StrainScorer.sustainedPeakSpanField(StrainScorer.sustainedPeakSpan(hrForPeak)),
             )
         }
@@ -1098,6 +1101,7 @@ object AnalyticsEngine {
             gravitySparse = gravitySparse,
             detectionFunnel = detectionFunnel,
             mainNightBlocks = mainGroup.map { SleepStageTotals.NightBlock(it.start, it.end) },
+            sustainedPeak = sustainedPeak,
         )
     }
 

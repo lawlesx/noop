@@ -1489,6 +1489,25 @@ object IntelligenceEngine {
         val dayCacheWindow = (0 until maxDays)
             .map { AnalyticsEngine.dayString(nowLocalMidnight - it * SECONDS_PER_DAY, tzOffsetSeconds) }.toHashSet()
         dayScanCache.keys.retainAll(dayCacheWindow)
+        // #2438 step 0, DETECTED ONLY: what the learned-HRmax rule would adopt from this pass's sustained
+        // daily peaks. Read off scoredNights, which holds reused and freshly scored days alike, so a cache hit
+        // cannot drop a day from the fold. Day keys are yyyy-MM-dd and compare chronologically as strings. On
+        // the default 21-day pass the window is the pass, not the full 90 days; peakDays says how many fed it.
+        // One line on the per-day diag channel; Effort keeps scoring against effMaxHR. Mirrors Swift.
+        run {
+            val oldestInWindow = AnalyticsEngine.dayString(
+                nowLocalMidnight - (StrainScorer.learnedHRmaxWindowDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds,
+            )
+            val peaks = scoredNights.filter { it.daily.day >= oldestInWindow }.mapNotNull { it.sustainedPeak }
+            val tanaka = if (profile.age > 0) StrainScorer.tanakaHRmax(profile.age) else null
+            diag(
+                StrainScorer.learnedHRmaxLine(
+                    anchorDay = AnalyticsEngine.dayString(nowLocalMidnight, tzOffsetSeconds),
+                    learned = StrainScorer.learnedHRmax(peaks, tanaka),
+                    tanaka = tanaka, override = maxHROverride, peakDays = peaks.size,
+                ),
+            )
+        }
         skippedSleepDays.emit(MIN_HR_SAMPLES, diag)
         // #1538: the denominator is the number of CACHEABLE days this pass (reused + freshly cached), not
         // [maxDays]. A day that never reaches the cache — an import/ring owner, an active trace, an
