@@ -46,6 +46,15 @@
     {
       "type": "out_of_scope_twin",
       "kind": "add-unpaired-function",
+      "identity": "kotlin\u0000android/app/src/main/java/com/noop/analytics/IntelligenceEngine.kt::recoveryTraceLines/3#1",
+      "identity_sha256": "a745d06b6114d693419f1cd50d999330c106cb466bdb69cb2b759d512d03bb95",
+      "platform": "kotlin",
+      "rationale": "Swift IntelligenceEngine.recoveryTraceLines(_:_:lnHrvBaseline:) has the same role in the excluded app layer: both feed one day's Charge inputs into the twinned recoveryTrace and append the twinned lnHrvShadowLine. This records a role twin only.",
+      "twin_path": "Strand/Data/IntelligenceEngine.swift"
+    },
+    {
+      "type": "out_of_scope_twin",
+      "kind": "add-unpaired-function",
       "identity": "kotlin\u0000android/app/src/main/java/com/noop/analytics/PhysiologicalStepCycleEngine.kt::loadCacheKey/7#1",
       "identity_sha256": "d975e64811f395077839f35c6797284bac55e6ad3e3b5e049bf826d69d5a2131",
       "platform": "kotlin",

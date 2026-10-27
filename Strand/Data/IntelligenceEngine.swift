@@ -2089,6 +2089,14 @@ final class IntelligenceEngine: ObservableObject {
                                                     tail: 14)
             for line in traced.lines { diagnosticSink?(line, .recovery) }
         }
+        // ln(RMSSD) shadow baseline for the Charge trace's `lnHrvShadow` line: the SAME HRV history and
+        // epoch as the HRV fold below, mapped into the log domain. Folded only while the Recovery test mode
+        // is on, and read only by the trace, so Charge is untouched. A mode flipped on mid-pass leaves this
+        // nil and the line is simply absent. Mirrors the Kotlin lnHrvBase2.
+        let lnHrvBase2: BaselineState? = TestCentre.active(.recovery)
+            ? Baselines.foldHistory(RecoveryScorer.lnHrvValues(hrvHistory.values), dayKeys: hrvHistory.dayKeys,
+                                    cfg: Baselines.readinessHRVLnCfg, baselineEpoch: hrvEpoch)
+            : nil
         let baselines2 = AnalyticsEngine.ProfileBaselines(
             // HRV honours noop.hrvBaselineEpoch; rhr/resp/skin honour noop.recoveryBaselineEpoch via their
             // parallel day keys, so the manual Recalibrate restarts the whole Charge build-up together.
@@ -2246,7 +2254,9 @@ final class IntelligenceEngine: ObservableObject {
             // term moved Charge and which was nil and forced the renorm, tagged `.recovery`. The trace's
             // score is RecoveryScorer.recovery verbatim, so the `recovery` written above is unchanged.
             if recoveryTraceActive {
-                for line in recoveryTraceLines(daily, baselines2) { diagnosticSink?(line, .recovery) }
+                for line in recoveryTraceLines(daily, baselines2, lnHrvBaseline: lnHrvBase2) {
+                    diagnosticSink?(line, .recovery)
+                }
             }
             let source = DaySource.classify(day: daily.day, importedWhoopDays: importedWhoopDays,
                                             appleHealthDays: appleHealthDays)
@@ -3335,17 +3345,26 @@ final class IntelligenceEngine: ObservableObject {
     /// trace can never diverge from the Charge number written for the day. Empty when a hard input
     /// (HRV / RHR / HRV-baseline) is missing, mirroring `recomputeRecovery`'s own early-nil. Only CALLED
     /// when `TestCentre.active(.recovery)` is true, so it costs nothing when the mode is off.
-    private func recoveryTraceLines(_ daily: DailyMetric, _ baselines: AnalyticsEngine.ProfileBaselines) -> [String] {
+    private func recoveryTraceLines(_ daily: DailyMetric, _ baselines: AnalyticsEngine.ProfileBaselines,
+                                    lnHrvBaseline: BaselineState? = nil) -> [String] {
         guard let hrvVal = daily.avgHrv, let rhrVal = daily.restingHr, let hrvBase = baselines.hrv else {
             return ["charge day=\(daily.day) nilScore reason=missingInput "
                 + "(hrv/rhr/hrvBaseline required)"]
         }
         let restQuality = AnalyticsEngine.Rest.composite(daily: daily).map { $0 / 100.0 } ?? daily.efficiency
-        let (_, trace) = RecoveryScorer.recoveryTrace(
+        let (_, baseTrace) = RecoveryScorer.recoveryTrace(
             hrv: hrvVal, rhr: Double(rhrVal), resp: daily.respRateBpm,
             hrvBaseline: hrvBase, rhrBaseline: baselines.restingHR,
             respBaseline: baselines.resp, sleepPerf: restQuality,
             skinTempDev: daily.skinTempDevC)
+        // The ln(RMSSD) shadow, from the SAME inputs, appended after the trace it shadows. Nil (no line)
+        // without a usable ln baseline.
+        let shadow = RecoveryScorer.lnHrvShadowLine(
+            hrv: hrvVal, rhr: Double(rhrVal), resp: daily.respRateBpm,
+            hrvBaseline: hrvBase, rhrBaseline: baselines.restingHR,
+            respBaseline: baselines.resp, sleepPerf: restQuality,
+            skinTempDev: daily.skinTempDevC, lnHrvBaseline: lnHrvBaseline)
+        let trace = baseTrace + [shadow].compactMap { $0 }
         // Prefix each line with the day key so a multi-night export stays parseable, matching the sleep
         // trace's per-day shape. Strip ONLY the leading "charge " token the trace builder writes (every
         // line starts with it), then re-emit as "charge day=<day> ...".
