@@ -554,7 +554,8 @@ object StrainScorer {
      * maximum is an artefact on rings (see [sustainedPeak]); the multi-day requirement absorbs a single
      * bad day on top of that. A null [tanaka] (no age) means any qualifying value is adopted.
      *
-     * Pure; the caller restricts [sustainedPeaks] to the window. Byte-identical to the Swift twin.
+     * Pure; the caller restricts [sustainedPeaks] to the window.
+     * Byte-identical to the Swift twin `learnedHRmax`.
      */
     fun learnedHRmax(
         sustainedPeaks: List<Double>,
@@ -572,7 +573,8 @@ object StrainScorer {
      * exists so contributed logs can show how often, and by how much, the step-0 rule would move HRmax
      * before it is allowed to. `override` is reported because the rule never applies over one.
      *
-     * No PII: a day key, bpm values and counts. Byte-identical string to the Swift twin.
+     * No PII: a day key, bpm values and counts.
+     * Byte-identical string to the Swift twin `learnedHRmaxLine`.
      */
     fun learnedHRmaxLine(
         anchorDay: String, learned: Double?, tanaka: Double?, override: Double?, peakDays: Int,
