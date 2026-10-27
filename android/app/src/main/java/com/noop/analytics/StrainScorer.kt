@@ -542,6 +542,48 @@ object StrainScorer {
     fun sustainedPeakField(sustainedPeak: Double?): String =
         " sustained=${WorkoutDetector.round0(sustainedPeak)}"
 
+    /** #2438 step 0: trailing window (days) and distinct-day count the learned-HRmax rule reads. */
+    const val learnedHRmaxWindowDays = 90
+    const val learnedHRmaxMinDays = 2
+
+    /**
+     * The HRmax the #2438 step-0 rule WOULD learn from per-day [sustainedPeak] values, or null when it
+     * would leave the incumbent alone. The rule: the highest level reached on at least [minDays] different
+     * days (the [minDays]-th highest daily peak), adopted only when it is ABOVE [tanaka], so it can raise
+     * the age formula but never lower it. Sustained peaks rather than raw maxima, because the raw daily
+     * maximum is an artefact on rings (see [sustainedPeak]); the multi-day requirement absorbs a single
+     * bad day on top of that. A null [tanaka] (no age) means any qualifying value is adopted.
+     *
+     * Pure; the caller restricts [sustainedPeaks] to the window.
+     * Byte-identical to the Swift twin `learnedHRmax`.
+     */
+    fun learnedHRmax(
+        sustainedPeaks: List<Double>,
+        tanaka: Double?,
+        minDays: Int = learnedHRmaxMinDays,
+    ): Double? {
+        if (minDays <= 0 || sustainedPeaks.size < minDays) return null
+        val candidate = sustainedPeaks.sortedDescending()[minDays - 1]
+        return if (tanaka == null || candidate > tanaka) candidate else null
+    }
+
+    /**
+     * One line per scoring pass reporting what [learnedHRmax] would do, beside the HRmax Effort actually
+     * used. DETECTED ONLY: nothing reads [learnedHRmax] to score, so this line changes no Effort value. It
+     * exists so contributed logs can show how often, and by how much, the step-0 rule would move HRmax
+     * before it is allowed to. `override` is reported because the rule never applies over one.
+     *
+     * No PII: a day key, bpm values and counts.
+     * Byte-identical string to the Swift twin `learnedHRmaxLine`.
+     */
+    fun learnedHRmaxLine(
+        anchorDay: String, learned: Double?, tanaka: Double?, override: Double?, peakDays: Int,
+    ): String =
+        "effort hrmaxLearned day=$anchorDay learned=${WorkoutDetector.round0(learned)}" +
+            " tanaka=${WorkoutDetector.round0(tanaka)} override=${WorkoutDetector.round0(override)}" +
+            " peakDays=$peakDays window=$learnedHRmaxWindowDays minDays=$learnedHRmaxMinDays" +
+            " (sustained peak on >=minDays days, raise only. DETECTED ONLY, not applied)"
+
     /** Consecutive samples a `sustained` peak must hold for, and the span they must fit in. */
     const val sustainedPeakSamples = 5
     const val sustainedPeakWindowS = 60L

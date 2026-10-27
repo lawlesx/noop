@@ -335,4 +335,11 @@ data class DayResult(
      * defaulted so every existing construction site is unchanged. Mirrors Swift `DayResult.mainNightBlocks`.
      */
     val mainNightBlocks: List<SleepStageTotals.NightBlock> = emptyList(),
+    /**
+     * The day's [StrainScorer.sustainedPeak] over the Effort HR window, the SAME value the `effort calib`
+     * line prints, or null when it was not computed (no diagnostic sink) or no run was dense enough. Read by
+     * the learned-HRmax instrumentation (#2438); scores nothing. Trailing + defaulted so every existing
+     * construction site is unchanged. Mirrors Swift `DayResult.sustainedPeak`.
+     */
+    val sustainedPeak: Double? = null,
 )

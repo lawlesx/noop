@@ -19,9 +19,10 @@ import kotlinx.coroutines.withContext
 
 /*
  * IntelligenceEngine.kt , on-device "intelligence": computes recovery / day-strain /
- * sleep from the raw strap streams using the same model shape WHOOP uses (HRV vs
- * personal baseline ~60%, resting HR ~20%, sleep ~15%, respiration ~5%; strain 0–21
- * from cardiovascular load).
+ * sleep from the raw strap streams using the same model shape WHOOP uses. The weights
+ * live in [RecoveryScorer] (HRV vs personal baseline 0.55, resting HR 0.20, sleep 0.15,
+ * respiration 0.05, skin temp 0.05); Effort is 0–100 from cardiovascular load
+ * ([StrainScorer]).
  *
  * Faithful Kotlin port of Strand/Data/IntelligenceEngine.swift (verified on macOS).
  * Same windows, same thresholds, same persistence model:
@@ -1489,6 +1490,25 @@ object IntelligenceEngine {
         val dayCacheWindow = (0 until maxDays)
             .map { AnalyticsEngine.dayString(nowLocalMidnight - it * SECONDS_PER_DAY, tzOffsetSeconds) }.toHashSet()
         dayScanCache.keys.retainAll(dayCacheWindow)
+        // #2438 step 0, DETECTED ONLY: what the learned-HRmax rule would adopt from this pass's sustained
+        // daily peaks. Read off scoredNights, which holds reused and freshly scored days alike, so a cache hit
+        // cannot drop a day from the fold. Day keys are yyyy-MM-dd and compare chronologically as strings. On
+        // the default 21-day pass the window is the pass, not the full 90 days; peakDays says how many fed it.
+        // One line on the per-day diag channel; Effort keeps scoring against effMaxHR. Mirrors Swift.
+        run {
+            val oldestInWindow = AnalyticsEngine.dayString(
+                nowLocalMidnight - (StrainScorer.learnedHRmaxWindowDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds,
+            )
+            val peaks = scoredNights.filter { it.daily.day >= oldestInWindow }.mapNotNull { it.sustainedPeak }
+            val tanaka = if (profile.age > 0) StrainScorer.tanakaHRmax(profile.age) else null
+            diag(
+                StrainScorer.learnedHRmaxLine(
+                    anchorDay = AnalyticsEngine.dayString(nowLocalMidnight, tzOffsetSeconds),
+                    learned = StrainScorer.learnedHRmax(peaks, tanaka),
+                    tanaka = tanaka, override = maxHROverride, peakDays = peaks.size,
+                ),
+            )
+        }
         skippedSleepDays.emit(MIN_HR_SAMPLES, diag)
         // #1538: the denominator is the number of CACHEABLE days this pass (reused + freshly cached), not
         // [maxDays]. A day that never reaches the cache — an import/ring owner, an active trace, an
@@ -1597,6 +1617,15 @@ object IntelligenceEngine {
         val baselines2 = ProfileBaselines(
             hrv = hrvBase2, restingHR = rhrBase2, resp = respBase2, skinTemp = skinBase2,
         )
+        // ln(RMSSD) shadow baseline for the Charge trace's `lnHrvShadow` line: the SAME HRV history and
+        // epoch as hrvBase2, mapped into the log domain. Folded only while the Recovery test mode is on, and
+        // read only by the trace, so Charge is untouched and the default path pays nothing. Mirrors Swift.
+        val lnHrvBase2 = if (recoveryTraceSink != null) {
+            Baselines.foldHistory(
+                RecoveryScorerTrace.lnHrvValues(hrvHistory.values), hrvHistory.dayKeys,
+                Baselines.readinessHRVLnCfg, baselineEpoch,
+            )
+        } else null
 
         // Real (non-detected) workouts in the scored window, used to de-duplicate detected bouts so a
         // user who BOTH has real sessions AND wears the strap doesn't see the same session twice (the
@@ -1701,7 +1730,7 @@ object IntelligenceEngine {
             // `recovery` written above is unchanged. Zero cost when off (the sink stays null, this branch
             // is skipped, recoveryTraceLines is never built). Mirrors the Swift recoveryTraceActive wiring.
             if (recoveryTraceSink != null) {
-                for (line in recoveryTraceLines(daily, baselines2)) recoveryTraceSink(line)
+                for (line in recoveryTraceLines(daily, baselines2, lnHrvBase2)) recoveryTraceSink(line)
             }
             RestScorer.restFromDaily(daily)?.let { rest ->
                 restRows.add(MetricSeriesRow(deviceId = computedId, day = daily.day, key = "sleep_performance", value = rest))
@@ -2481,7 +2510,9 @@ object IntelligenceEngine {
      * when the Recovery test mode is on, so it costs nothing when the mode is off. Mirrors the Swift
      * recoveryTraceLines.
      */
-    private fun recoveryTraceLines(daily: DailyMetric, baselines: ProfileBaselines): List<String> {
+    private fun recoveryTraceLines(
+        daily: DailyMetric, baselines: ProfileBaselines, lnHrvBaseline: BaselineState? = null,
+    ): List<String> {
         val hrvVal = daily.avgHrv
         val rhrVal = daily.restingHr
         val hrvBase = baselines.hrv
@@ -2501,9 +2532,22 @@ object IntelligenceEngine {
             sleepPerf = restQuality,
             skinTempDev = daily.skinTempDevC,
         )
+        // The ln(RMSSD) shadow, from the SAME inputs, appended after the trace it shadows. Null (no line)
+        // without a usable ln baseline.
+        val shadow = RecoveryScorerTrace.lnHrvShadowLine(
+            hrv = hrvVal,
+            rhr = rhrVal.toDouble(),
+            resp = daily.respRateBpm,
+            hrvBaseline = hrvBase,
+            rhrBaseline = baselines.restingHR,
+            respBaseline = baselines.resp,
+            sleepPerf = restQuality,
+            skinTempDev = daily.skinTempDevC,
+            lnHrvBaseline = lnHrvBaseline,
+        )
         // Prefix each line with the day key so a multi-night export stays parseable, matching the sleep
         // trace's per-day shape.
-        return trace.map { "charge day=${daily.day} " + it.removePrefix("charge ") }
+        return (trace + listOfNotNull(shadow)).map { "charge day=${daily.day} " + it.removePrefix("charge ") }
     }
 
     /**
