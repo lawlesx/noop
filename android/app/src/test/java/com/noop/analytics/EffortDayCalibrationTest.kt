@@ -303,6 +303,64 @@ class EffortDayCalibrationTest {
         }
     }
 
+    // ---- learned HRmax (DETECTED ONLY) ----
+
+    /**
+     * The rule: the second-highest sustained daily peak, adopted only above Tanaka. Each row is the input,
+     * the Tanaka value, and what the rule would learn. Byte-parity table with the Swift twin.
+     */
+    @Test fun learnedHRmaxRule() {
+        val rows: List<Triple<List<Double>, Double?, Double?>> = listOf(
+            Triple(emptyList(), 187.0, null),                // no days
+            Triple(listOf(195.0), 187.0, null),              // one day is not two
+            Triple(listOf(170.0, 195.0, 192.0), 187.0, 192.0), // second-highest, order-independent
+            Triple(listOf(195.0, 186.0), 187.0, null),       // second day below Tanaka: never lowers
+            Triple(listOf(195.0, 187.0), 187.0, null),       // equal is not above
+            Triple(listOf(190.0, 190.0), 187.0, 190.0),      // two days at the same level count
+            Triple(listOf(195.0, 192.0), null, 192.0),       // no age: any qualifying value
+        )
+        for ((peaks, tanaka, want) in rows) {
+            assertEquals("$peaks $tanaka", want, StrainScorer.learnedHRmax(peaks, tanaka))
+        }
+        assertNull(StrainScorer.learnedHRmax(listOf(195.0, 192.0), null, minDays = 0))
+    }
+
+    /** The exact bytes, as for the calib line: contributed logs are compared across platforms. */
+    @Test fun learnedHRmaxLineIsExactlyThis() {
+        assertEquals(
+            "effort hrmaxLearned day=2026-09-25 learned=192 tanaka=187 override=nil peakDays=14 window=90 " +
+                "minDays=2 (sustained peak on >=minDays days, raise only. DETECTED ONLY, not applied)",
+            StrainScorer.learnedHRmaxLine(
+                anchorDay = "2026-09-25", learned = 192.0, tanaka = 187.0, override = null, peakDays = 14,
+            ),
+        )
+    }
+
+    /**
+     * [DayResult.sustainedPeak] is the value the calib line printed, not a second computation that could
+     * drift from it; and it stays null for a caller that attached no diagnostic sink.
+     */
+    @Test fun dayResultCarriesTheSustainedPeakTheLinePrinted() {
+        val emitted = mutableListOf<String>()
+        val res = AnalyticsEngine.analyzeDay(
+            day = "2026-09-25",
+            strainDiag = { emitted.add(it) },
+            hr = dayHR(peakBpm = 178, spikeBpm = 201),
+            profile = UserProfile(age = 30.0),
+            maxHROverride = null,
+        )
+        val calib = emitted.first { it.startsWith("effort calib ") }
+        assertEquals(178.0, res.sustainedPeak)
+        assertEquals(calib, "178", field(calib, "sustained="))
+        val silent = AnalyticsEngine.analyzeDay(
+            day = "2026-09-25",
+            hr = dayHR(peakBpm = 178),
+            profile = UserProfile(age = 30.0),
+            maxHROverride = null,
+        )
+        assertNull(silent.sustainedPeak)
+    }
+
     // ---- fixture ----
 
     /** Value of `key=` up to the next space. */

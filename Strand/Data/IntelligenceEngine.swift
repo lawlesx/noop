@@ -1855,6 +1855,22 @@ final class IntelligenceEngine: ObservableObject {
             let dayCacheWindow = Set((0..<maxDays).map {
                 AnalyticsEngine.dayString(nowLocalMidnight - $0 * 86_400, offsetSec: tzOffset) })
             dayScanCacheLocal = dayScanCacheLocal.filter { dayCacheWindow.contains($0.key) }
+            // #2438 step 0, DETECTED ONLY: what the learned-HRmax rule would adopt from this pass's sustained
+            // daily peaks. Read off `out`, which holds reused and freshly scored days alike, so a cache hit
+            // cannot drop a day from the fold. Day keys are yyyy-MM-dd and compare chronologically as strings.
+            // On the default 21-day pass the window is the pass, not the full 90 days; peakDays says how many
+            // fed it. One line on the skipped-day channel; Effort keeps scoring against maxHR. Mirrors Kotlin.
+            do {
+                let oldestInWindow = AnalyticsEngine.dayString(
+                    nowLocalMidnight - (StrainScorer.learnedHRmaxWindowDays - 1) * 86_400, offsetSec: tzOffset)
+                let peaks = out.filter { $0.result.daily.day >= oldestInWindow }
+                    .compactMap { $0.result.sustainedPeak }
+                let tanaka: Double? = up.age > 0 ? StrainScorer.tanakaHRmax(age: up.age) : nil
+                skippedDayLines.append(StrainScorer.learnedHRmaxLine(
+                    anchorDay: AnalyticsEngine.dayString(nowLocalMidnight, offsetSec: tzOffset),
+                    learned: StrainScorer.learnedHRmax(peaks, tanaka: tanaka),
+                    tanaka: tanaka, override: maxHR, peakDays: peaks.count))
+            }
             if let line = skippedSleepDaysLine(skippedSleepDays, minHrSamples: IntelligenceEngine.minHrSamples) {
                 skippedDayLines.append(line)
             }
