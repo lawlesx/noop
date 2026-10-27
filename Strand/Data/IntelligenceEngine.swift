@@ -3335,11 +3335,19 @@ final class IntelligenceEngine: ObservableObject {
                 + "(hrv/rhr/hrvBaseline required)"]
         }
         let restQuality = AnalyticsEngine.Rest.composite(daily: daily).map { $0 / 100.0 } ?? daily.efficiency
-        let (_, trace) = RecoveryScorer.recoveryTrace(
+        let (_, baseTrace) = RecoveryScorer.recoveryTrace(
+            hrv: hrvVal, rhr: Double(rhrVal), resp: daily.respRateBpm,
+            hrvBaseline: hrvBase, rhrBaseline: baselines.restingHR,
+            respBaseline: baselines.resp, sleepPerf: restQuality,
+            skinTempDev: daily.skinTempDevC)
+        // The ln(RMSSD) shadow, from the SAME inputs, appended after the trace it shadows. Nil (no line)
+        // without a usable ln baseline.
+        let shadow = RecoveryScorer.lnHrvShadowLine(
             hrv: hrvVal, rhr: Double(rhrVal), resp: daily.respRateBpm,
             hrvBaseline: hrvBase, rhrBaseline: baselines.restingHR,
             respBaseline: baselines.resp, sleepPerf: restQuality,
             skinTempDev: daily.skinTempDevC, lnHrvBaseline: lnHrvBaseline)
+        let trace = baseTrace + [shadow].compactMap { $0 }
         // Prefix each line with the day key so a multi-night export stays parseable, matching the sleep
         // trace's per-day shape. Strip ONLY the leading "charge " token the trace builder writes (every
         // line starts with it), then re-emit as "charge day=<day> ...".

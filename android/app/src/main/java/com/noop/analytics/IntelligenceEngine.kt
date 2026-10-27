@@ -2511,11 +2511,23 @@ object IntelligenceEngine {
             respBaseline = baselines.resp,
             sleepPerf = restQuality,
             skinTempDev = daily.skinTempDevC,
+        )
+        // The ln(RMSSD) shadow, from the SAME inputs, appended after the trace it shadows. Null (no line)
+        // without a usable ln baseline.
+        val shadow = RecoveryScorerTrace.lnHrvShadowLine(
+            hrv = hrvVal,
+            rhr = rhrVal.toDouble(),
+            resp = daily.respRateBpm,
+            hrvBaseline = hrvBase,
+            rhrBaseline = baselines.restingHR,
+            respBaseline = baselines.resp,
+            sleepPerf = restQuality,
+            skinTempDev = daily.skinTempDevC,
             lnHrvBaseline = lnHrvBaseline,
         )
         // Prefix each line with the day key so a multi-night export stays parseable, matching the sleep
         // trace's per-day shape.
-        return trace.map { "charge day=${daily.day} " + it.removePrefix("charge ") }
+        return (trace + listOfNotNull(shadow)).map { "charge day=${daily.day} " + it.removePrefix("charge ") }
     }
 
     /**

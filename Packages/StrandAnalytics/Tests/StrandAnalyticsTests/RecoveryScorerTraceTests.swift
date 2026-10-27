@@ -12,39 +12,37 @@ final class RecoveryScorerTraceTests: XCTestCase {
                       nightsSinceUpdate: 0, status: nValid >= 14 ? .trusted : .provisional)
     }
 
-    func testLnHrvShadowLineNeverMovesTheScore() {
-        // A usable ln baseline adds exactly one shadow line; the returned score stays recovery(...) verbatim.
+    func testLnHrvShadowLineIsExactlyThis() {
+        // The shadow re-runs recovery(...) with ln(RMSSD) in the HRV slot. Pinned literal; the Kotlin
+        // RecoveryScorerTraceTest asserts the same string.
         let hrvB = baseline(mean: 50, sigma: 6)
         let rhrB = baseline(mean: 55, sigma: 3)
         let lnB = baseline(mean: log(50), sigma: 0.12)
-        let plain = RecoveryScorer.recovery(
-            hrv: 62, rhr: 51, resp: nil,
-            hrvBaseline: hrvB, rhrBaseline: rhrB, respBaseline: nil,
-            sleepPerf: 0.9, skinTempDev: nil)
-        let (traced, lines) = RecoveryScorer.recoveryTrace(
+        let line = RecoveryScorer.lnHrvShadowLine(
             hrv: 62, rhr: 51, resp: nil,
             hrvBaseline: hrvB, rhrBaseline: rhrB, respBaseline: nil,
             sleepPerf: 0.9, skinTempDev: nil, lnHrvBaseline: lnB)
-        XCTAssertEqual(traced, plain)
-        // Pinned literal; the Kotlin RecoveryScorerTraceTest asserts the same string.
-        XCTAssertEqual(lines.filter { $0.hasPrefix("charge lnHrvShadow ") }, [
+        XCTAssertEqual(line,
             "charge lnHrvShadow lnHrvZ=1.79 rawHrvZ=2.0 lnMean=3.91 lnSpread=0.1 wouldScore=93.45 "
                 + "delta=-1.14 wouldBand=green (HRV term on ln(RMSSD). DETECTED ONLY, not applied: "
-                + "the score above is unchanged)",
-        ])
+                + "the score above is unchanged)")
     }
 
-    func testLnHrvShadowLineAbsentWithoutUsableLnBaseline() {
+    func testLnHrvShadowLineNilWithoutUsableLnBaselineOrScore() {
         let hrvB = baseline(mean: 50, sigma: 6)
         let calibrating = BaselineState(baseline: log(50), spread: 0.1, nValid: 2,
                                         nightsSinceUpdate: 0, status: .calibrating)
         for lnB in [nil, calibrating] {
-            let (_, lines) = RecoveryScorer.recoveryTrace(
+            XCTAssertNil(RecoveryScorer.lnHrvShadowLine(
                 hrv: 62, rhr: 51, resp: nil,
                 hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
-                sleepPerf: 0.9, skinTempDev: nil, lnHrvBaseline: lnB)
-            XCTAssertFalse(lines.contains { $0.contains("lnHrvShadow") })
+                sleepPerf: 0.9, skinTempDev: nil, lnHrvBaseline: lnB))
         }
+        // No real score (cold-start HRV baseline): nothing to shadow.
+        XCTAssertNil(RecoveryScorer.lnHrvShadowLine(
+            hrv: 62, rhr: 51, resp: nil,
+            hrvBaseline: calibrating, rhrBaseline: nil, respBaseline: nil,
+            sleepPerf: 0.9, skinTempDev: nil, lnHrvBaseline: baseline(mean: log(50), sigma: 0.12)))
     }
 
     func testLnHrvValuesKeepsNilsAndFloorsAtOneMs() {

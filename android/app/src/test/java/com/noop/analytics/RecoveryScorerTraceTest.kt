@@ -20,47 +20,45 @@ class RecoveryScorerTraceTest {
             status = if (nValid >= 14) BaselineStatus.TRUSTED else BaselineStatus.PROVISIONAL,
         )
 
-    @Test fun lnHrvShadowLineNeverMovesTheScore() {
-        // A usable ln baseline adds exactly one shadow line; the returned score stays recovery(...) verbatim.
-        val hrvB = baseline(50.0, 6.0)
-        val rhrB = baseline(55.0, 3.0)
-        val lnB = baseline(kotlin.math.ln(50.0), 0.12)
-        val plain = RecoveryScorer.recovery(
+    @Test fun lnHrvShadowLineIsExactlyThis() {
+        // The shadow re-runs recovery(...) with ln(RMSSD) in the HRV slot. Expected literal is the Swift
+        // RecoveryScorerTraceTests output, pasted verbatim (oracle).
+        val line = RecoveryScorerTrace.lnHrvShadowLine(
             hrv = 62.0, rhr = 51.0, resp = null,
-            hrvBaseline = hrvB, rhrBaseline = rhrB, respBaseline = null,
-            sleepPerf = 0.9, skinTempDev = null,
+            hrvBaseline = baseline(50.0, 6.0), rhrBaseline = baseline(55.0, 3.0), respBaseline = null,
+            sleepPerf = 0.9, skinTempDev = null, lnHrvBaseline = baseline(kotlin.math.ln(50.0), 0.12),
         )
-        val (traced, lines) = RecoveryScorerTrace.recoveryTrace(
-            hrv = 62.0, rhr = 51.0, resp = null,
-            hrvBaseline = hrvB, rhrBaseline = rhrB, respBaseline = null,
-            sleepPerf = 0.9, skinTempDev = null, lnHrvBaseline = lnB,
-        )
-        assertEquals(plain, traced)
-        // Expected literal is the Swift RecoveryScorerTraceTests output, pasted verbatim (oracle).
         assertEquals(
-            listOf(
-                "charge lnHrvShadow lnHrvZ=1.79 rawHrvZ=2.0 lnMean=3.91 lnSpread=0.1 wouldScore=93.45 " +
-                    "delta=-1.14 wouldBand=green (HRV term on ln(RMSSD). DETECTED ONLY, not applied: " +
-                    "the score above is unchanged)",
-            ),
-            lines.filter { it.startsWith("charge lnHrvShadow ") },
+            "charge lnHrvShadow lnHrvZ=1.79 rawHrvZ=2.0 lnMean=3.91 lnSpread=0.1 wouldScore=93.45 " +
+                "delta=-1.14 wouldBand=green (HRV term on ln(RMSSD). DETECTED ONLY, not applied: " +
+                "the score above is unchanged)",
+            line,
         )
     }
 
-    @Test fun lnHrvShadowLineAbsentWithoutUsableLnBaseline() {
+    @Test fun lnHrvShadowLineNullWithoutUsableLnBaselineOrScore() {
         val hrvB = baseline(50.0, 6.0)
         val calibrating = BaselineState(
             baseline = kotlin.math.ln(50.0), spread = 0.1, nValid = 2, nightsSinceUpdate = 0,
             status = BaselineStatus.CALIBRATING,
         )
         for (lnB in listOf(null, calibrating)) {
-            val (_, lines) = RecoveryScorerTrace.recoveryTrace(
-                hrv = 62.0, rhr = 51.0, resp = null,
-                hrvBaseline = hrvB, rhrBaseline = null, respBaseline = null,
-                sleepPerf = 0.9, skinTempDev = null, lnHrvBaseline = lnB,
+            assertNull(
+                RecoveryScorerTrace.lnHrvShadowLine(
+                    hrv = 62.0, rhr = 51.0, resp = null,
+                    hrvBaseline = hrvB, rhrBaseline = null, respBaseline = null,
+                    sleepPerf = 0.9, skinTempDev = null, lnHrvBaseline = lnB,
+                ),
             )
-            assertFalse(lines.any { it.contains("lnHrvShadow") })
         }
+        // No real score (cold-start HRV baseline): nothing to shadow.
+        assertNull(
+            RecoveryScorerTrace.lnHrvShadowLine(
+                hrv = 62.0, rhr = 51.0, resp = null,
+                hrvBaseline = calibrating, rhrBaseline = null, respBaseline = null,
+                sleepPerf = 0.9, skinTempDev = null, lnHrvBaseline = baseline(kotlin.math.ln(50.0), 0.12),
+            ),
+        )
     }
 
     @Test fun lnHrvValuesKeepsNullsAndFloorsAtOneMs() {
